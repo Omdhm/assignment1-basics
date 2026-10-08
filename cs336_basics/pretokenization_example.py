@@ -50,13 +50,61 @@ def find_chunk_boundaries(
 
 
 ## Usage
-with open(..., "rb") as f:
-    num_processes = 4
-    boundaries = find_chunk_boundaries(f, num_processes, b"<|endoftext|>")
 
-    # The following is a serial implementation, but you can parallelize this
-    # by sending each start/end pair to a set of processes.
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-        f.seek(start)
-        chunk = f.read(end - start).decode("utf-8", errors="ignore")
+
+
+def wawa_file_reader(
+    f: BinaryIO,
+    desired_chunk:int,
+    special_token: list[bytes]
+) -> list[int]:
+    assert all(isinstance(st, bytes) for st in special_token), "Special Token needs to be bytes instance/type"
+
+    file_size = f.seek(0, os.SEEK_END)
+    f.seek(0)
+    chunk = file_size // desired_chunk
+    naive_boundaries = [i*chunk for i in range(desired_chunk+1)]
+    naive_boundaries[-1] = (file_size)
+    mini_size = 4096
+
+    for i in range(1, len(naive_boundaries)-1):
+        position = naive_boundaries[i]
+        f.seek(position)
+        while True:
+            mini_read = f.read(mini_size)
+            if mini_read == b"":
+                naive_boundaries[i] = file_size
+                break
+            found_at = min([mini_read.find(st) for st in special_token if mini_read.find(st) !=-1 ], default=-1)
+            if found_at != -1:
+                naive_boundaries[i] = found_at + position
+                break
+            position+=mini_size
+
+    return sorted(set(naive_boundaries))
+
+
+
+
+
+            
+
+
+
+        
+
+
+
+     
+
+
+with open("tests/fixtures/corpus.en", "rb") as f:
+    num_processes = 4
+    boundaries =  wawa_file_reader(f, num_processes, [b"<|user|>"])
+    boundaries1 =  find_chunk_boundaries(f, num_processes, b"<|user|>")
+    # # The following is a serial implementation, but you can parallelize this
+    # # by sending each start/end pair to a set of processes.
+    print(boundaries)
+    print(boundaries1)
+        
         # Run pre-tokenization on your chunk and store the counts for each pre-token
