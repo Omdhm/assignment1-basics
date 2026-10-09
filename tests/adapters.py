@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-from cs336_basics.pretokenization_example import wawa_file_reader
+#from cs336_basics.pretokenization_example import wawa_file_reader
 
 def run_linear(
     d_in: int,
@@ -561,6 +561,38 @@ def get_tokenizer(
     raise NotImplementedError
 
 import regex as re
+from collections import Counter
+from itertools import chain
+
+
+def bpe_pair(word):
+    if len(word)>1:
+        return  [(a,b) for a, b in zip(word[:-1], word[1:])]
+    else:
+        return word
+
+def merge_pairs(pairs, word):
+    new_w = []
+    p=1
+    if len(word)>1:
+        while p <= len(word):
+            if word[p-1]==pairs[0] and pairs[1]==word[p] :
+                new_vocab = pairs[0] +pairs[1]
+                new_w.append(new_vocab)
+                p+=2
+                if p == len(word):
+                    new_w.append(word[p-1])
+                    break
+            else:
+                new_w.append(word[p-1])
+                p+=1
+                if p == len(word):
+                    new_w.append(word[p-1])
+                    break
+        return new_w
+    else:
+        return word
+
 
 def run_train_bpe(
     input_path: str | os.PathLike,
@@ -589,83 +621,59 @@ def run_train_bpe(
                 representing that <token1> was merged with <token2>.
                 Merges are ordered by order of creation.
     """
-    #special_tokens_binary = [b''+s for s in special_tokens]
-    st_escape = [st.encode('utf-8')  for st in special_tokens]
+    special_tokens_binary = [s.encode('utf-8') for s in special_tokens]
+    st_escape = [re.escape(st)  for st in special_tokens]
     pat_st =  "|".join(st_escape) 
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
     corpus = []
-    with open(input_path, "r", encoding="utf-8") as f:
-        train_data = f.read()
-        initial = 0
-        for match in re.finditer(pat_st, train_data):
-            print(match.start(), match.group())
-            f.seek(match.start())
-            #print(f.read(match.end()-match.start() ))
-            decode_corpus = train_data[initial:match.start()]
-            corpus.extend(re.findall(PAT, decode_corpus))
-            corpus.append(match.group())
-            initial = match.end()
-
-        #convert to bytes
-        vocab = {id: bytes([x]) for x in range(256)}
-        corpus_bytes = [s.encode('utf-8')  for s in corpus]
-        print(corpus_bytes)
-        bpe_pairs = []
-
-
-    #print(corpus)
     vocab: dict[int, bytes] ={}
     merges: list[tuple[bytes, bytes]] =[]
+    with open(input_path, "r", encoding="utf-8") as f:
+        train_data = f.read()
+    initial = 0
+    matches = re.finditer(pat_st, train_data)
+    #print(corpus)
+    while True :
+        match = next(matches, None)
+        #print(match.start(), match.group())
+        if match is not None:
+            decode_corpus = train_data[initial:match.start()]
+            corpus.extend([list(w) for w in re.findall(PAT, decode_corpus)])
+            corpus.append([match.group()])
+            initial = match.end()
+            match = next(matches, None)
+        else:
+            decode_corpus = train_data[initial:]
+            corpus.extend([list(w) for w in re.findall(PAT, decode_corpus)])
+            break
+
+    #print(corpus)
+    
+    sp_vocab = {i: st for i, st in enumerate(special_tokens_binary) }
+    vocab_size_v1=len(sp_vocab)
+    vocab_256 = { vocab_size_v1+x:bytes([x]) for x in range(256)}
+    vocab= sp_vocab | vocab_256 
+    cs = len(vocab)  
+    #convert to bytes
+    for v in range(vocab_size-cs):
+        #print(corpus)
+        pairs = list(chain.from_iterable([bpe_pair(w) for w in corpus if len(w)>1]))
+        merges_pairs = Counter(pairs)
+        #print(pairs)
+        if len(pairs) ==0:
+            break
+        wining_pair = max(merges_pairs, key=merges_pairs.get)
+        vocab[len(vocab)] = (wining_pair[0] + wining_pair[1]).encode('utf-8')
+        corpus = [merge_pairs(wining_pair,w) for w in corpus]
+        merges.append((wining_pair[0].encode('utf-8'),wining_pair[1].encode('utf-8')))
+    #print(vocab)
     return (vocab, merges)
 
-path = "tests/fixtures/tinystories_sample.txt"
-special_tokens = ["<|user|>", "<|endoftext|>"]
-vocab_size = 1000
+# path = "tests/fixtures/tinystories_sample_5M.txt"
+# special_tokens = ["<|endoftext|>"]
+# vocab_size = 100
 
-run_train_bpe(path, vocab_size, special_tokens)
+# v, m = run_train_bpe(path, vocab_size, special_tokens)
     
+# print(v)
 
-
-
-    # with open("tests/fixtures/corpus.en", "r", encoding="utf-8") as f:
-    #         train_data = f.read()
-    # corpus = list(map(int, train_data.encode("utf-8")))
-    # corpus_v1 = corpus.copy()
-    # vocab: dict[int, bytes] = {x: bytes([x]) for x in range(256)}
-    # merge: list[tuple[bytes, bytes]] = []
-    # #merge_tuple: list[tuple[bytes, bytes]] = {}
-    # #corpus_Reg = regex.findall(r"\w+|.", corpus.encode("utf-8"))
-    # while (vocab_size - len(special_tokens) - len(vocab)) != 0:
-    #         merge_tuple = [(corpus_v1[i-1], corpus_v1[i]) for i in range(1, len(corpus_v1))]
-    #         merge_tuple_count = Counter(merge_tuple)
-    #         ind = max(merge_tuple_count, key=merge_tuple_count.get)
-    #         new_token = len(vocab)+1
-    #         vocab[new_token] =  ind[0]+ind[0]
-    #         merge.append((vocab[ind[0]], vocab[ind[1]]))
-    #         def check_pair(a,b, p1, p2):
-    #             if a==p1 and b==p2:
-    #                 return True
-    #             else:
-    #                 return False
-    #         p = 1
-    #         new_corpus = []
-    #         if len(corpus_v1) == 1:
-    #             new_corpus.append(corpus_v1[p-1])
-    #         elif len(corpus_v1) == 0:
-    #             print("corpus is empty")
-    #         else:
-    #             while p <= len(corpus_v1):
-    #                 if check_pair(corpus_v1[p-1],corpus_v1[p], ind[0], ind[1]):
-    #                     new_corpus.append(new_token)
-    #                     p+=2
-    #                     if p == len(corpus_v1):
-    #                         new_corpus.append(corpus_v1[p-1])
-    #                         break
-    #                 else:
-    #                     new_corpus.append(corpus_v1[p-1])
-    #                     p+=1
-    #                     if p == len(corpus_v1):
-    #                         new_corpus.append(corpus_v1[p-1])
-    #                         break
-    #         corpus_v1 = new_corpus
-    # return(vocab, merge)
