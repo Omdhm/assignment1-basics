@@ -97,14 +97,22 @@ def wawa_file_reader(
 
      
 
+import regex as re
 
-with open("tests/fixtures/corpus.en", "rb") as f:
+with open("tests/fixtures/tinystories_sample_5M.txt", "rb") as f:
     num_processes = 4
-    boundaries =  wawa_file_reader(f, num_processes, [b"<|user|>"])
-    boundaries1 =  find_chunk_boundaries(f, num_processes, b"<|user|>")
+    special_tokens=[b"<|endoftext|>"]
+    boundaries =  wawa_file_reader(f, num_processes, special_tokens )
+    st_escape = [re.escape(st)  for st in special_tokens]
+    pat_st =  "|".join(st_escape) 
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    #boundaries1 =  find_chunk_boundaries(f, num_processes, b"<|user|>")
     # # The following is a serial implementation, but you can parallelize this
     # # by sending each start/end pair to a set of processes.
     print(boundaries)
-    print(boundaries1)
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+            f.seek(start)
+            chunk = f.read(end - start).decode("utf-8", errors="ignore")
+            #print(chunk)
         
         # Run pre-tokenization on your chunk and store the counts for each pre-token

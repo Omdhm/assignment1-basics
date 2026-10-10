@@ -17,7 +17,7 @@ def test_train_bpe_speed():
     start_time = time.time()
     _, _ = run_train_bpe(
         input_path=input_path,
-        vocab_size=300,
+        vocab_size=500,
         special_tokens=["<|endoftext|>"],
     )
     end_time = time.time()
@@ -28,7 +28,7 @@ def test_train_bpe():
     input_path = FIXTURES_PATH / "corpus.en"
     vocab, merges = run_train_bpe(
         input_path=input_path,
-        vocab_size=300,
+        vocab_size=500,
         special_tokens=["<|endoftext|>"],
     )
 
@@ -72,7 +72,7 @@ def test_train_bpe_special_tokens(snapshot):
     input_path = FIXTURES_PATH / "tinystories_sample_5M.txt"
     vocab, merges = run_train_bpe(
         input_path=input_path,
-        vocab_size=300,
+        vocab_size=1000,
         special_tokens=["<|endoftext|>"],
     )
 

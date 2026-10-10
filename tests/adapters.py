@@ -573,25 +573,16 @@ def bpe_pair(word):
 
 def merge_pairs(pairs, word):
     new_w = []
-    p=1
-    if len(word)>1:
-        while p <= len(word):
-            if word[p-1]==pairs[0] and pairs[1]==word[p] :
+    p=0
+    while p < len(word):
+            if p +1< len(word)and word[p]==pairs[0] and pairs[1]==word[p+1] :
                 new_vocab = pairs[0] +pairs[1]
                 new_w.append(new_vocab)
                 p+=2
-                if p == len(word):
-                    new_w.append(word[p-1])
-                    break
             else:
-                new_w.append(word[p-1])
+                new_w.append(word[p])
                 p+=1
-                if p == len(word):
-                    new_w.append(word[p-1])
-                    break
-        return new_w
-    else:
-        return word
+    return new_w
 
 
 def run_train_bpe(
@@ -600,28 +591,9 @@ def run_train_bpe(
     special_tokens: list[str],
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    """Given the path to an input corpus, run train a BPE tokenizer and
-    output its vocabulary and merges.
 
-    Args:
-        input_path (str | os.PathLike): Path to BPE tokenizer training data.
-        vocab_size (int): Total number of items in the tokenizer's vocabulary (including special tokens).
-        special_tokens (list[str]): A list of string special tokens to be added to the tokenizer vocabulary.
-            These strings will never be split into multiple tokens, and will always be
-            kept as a single token. If these special tokens occur in the `input_path`,
-            they are treated as any other string.
 
-    Returns:
-        tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-            vocab:
-                The trained tokenizer vocabulary, a mapping from int (token ID in the vocabulary)
-                to bytes (token bytes)
-            merges:
-                BPE merges. Each list item is a tuple of bytes (<token1>, <token2>),
-                representing that <token1> was merged with <token2>.
-                Merges are ordered by order of creation.
-    """
-    special_tokens_binary = [s.encode('utf-8') for s in special_tokens]
+    #special_tokens_binary = [s.encode('utf-8') for s in special_tokens]
     st_escape = [re.escape(st)  for st in special_tokens]
     pat_st =  "|".join(st_escape) 
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
@@ -632,48 +604,39 @@ def run_train_bpe(
         train_data = f.read()
     initial = 0
     matches = re.finditer(pat_st, train_data)
-    #print(corpus)
+    match = next(matches, None)
     while True :
-        match = next(matches, None)
-        #print(match.start(), match.group())
         if match is not None:
             decode_corpus = train_data[initial:match.start()]
-            corpus.extend([list(w) for w in re.findall(PAT, decode_corpus)])
+            corpus.extend([[bytes([b]) for b in w.encode("utf-8")] for w in re.findall(PAT, decode_corpus)])
             corpus.append([match.group()])
             initial = match.end()
             match = next(matches, None)
         else:
             decode_corpus = train_data[initial:]
-            corpus.extend([list(w) for w in re.findall(PAT, decode_corpus)])
+            corpus.extend([[bytes([b]) for b in w.encode("utf-8")] for w in re.findall(PAT, decode_corpus)])
             break
-
-    #print(corpus)
-    
-    sp_vocab = {i: st for i, st in enumerate(special_tokens_binary) }
+    sp_vocab = {i: st.encode('utf-8') for i, st in enumerate(special_tokens) }
     vocab_size_v1=len(sp_vocab)
     vocab_256 = { vocab_size_v1+x:bytes([x]) for x in range(256)}
     vocab= sp_vocab | vocab_256 
-    cs = len(vocab)  
-    #convert to bytes
+    cs = len(vocab) 
     for v in range(vocab_size-cs):
-        #print(corpus)
-        pairs = list(chain.from_iterable([bpe_pair(w) for w in corpus if len(w)>1]))
+        pairs = [pair for w in corpus if len(w) > 1 for pair in bpe_pair(w)]
         merges_pairs = Counter(pairs)
-        #print(pairs)
         if len(pairs) ==0:
             break
-        wining_pair = max(merges_pairs, key=merges_pairs.get)
-        vocab[len(vocab)] = (wining_pair[0] + wining_pair[1]).encode('utf-8')
-        corpus = [merge_pairs(wining_pair,w) for w in corpus]
-        merges.append((wining_pair[0].encode('utf-8'),wining_pair[1].encode('utf-8')))
-    #print(vocab)
+        best_pair, _ = max(merges_pairs.items(), key=lambda x: (x[1], x[0]))
+        vocab[len(vocab)] = best_pair[0] + best_pair[1]
+        corpus = [merge_pairs(best_pair,w) for w in corpus]
+        merges.append((best_pair[0],best_pair[1]))
+
     return (vocab, merges)
+
 
 # path = "tests/fixtures/tinystories_sample_5M.txt"
 # special_tokens = ["<|endoftext|>"]
-# vocab_size = 100
-
+# vocab_size = 1000
 # v, m = run_train_bpe(path, vocab_size, special_tokens)
-    
 # print(v)
 
