@@ -8,7 +8,7 @@ import numpy.typing as npt
 import torch
 from jaxtyping import Bool, Float, Int
 from torch import Tensor
-#from cs336_basics.pretokenization_example import wawa_file_reader
+from cs336_basics.pretokenization_example import wawa_file_reader, processing
 
 def run_linear(
     d_in: int,
@@ -561,9 +561,8 @@ def get_tokenizer(
     raise NotImplementedError
 
 import regex as re
-from collections import Counter
-from itertools import chain
-
+from collections import defaultdict
+import time
 
 def bpe_pair(word):
     if len(word)>1:
@@ -574,15 +573,58 @@ def bpe_pair(word):
 def merge_pairs(pairs, word):
     new_w = []
     p=0
-    while p < len(word):
-            if p +1< len(word)and word[p]==pairs[0] and pairs[1]==word[p+1] :
-                new_vocab = pairs[0] +pairs[1]
-                new_w.append(new_vocab)
-                p+=2
-            else:
-                new_w.append(word[p])
-                p+=1
-    return new_w
+    #print(list(pairs), word)
+    if list(pairs)[0] in word and list(pairs)[1] in word :
+        
+        while p < len(word):
+                if p +1< len(word)and word[p]==pairs[0] and pairs[1]==word[p+1] :
+                    new_vocab = pairs[0] +pairs[1]
+                    new_w.append(new_vocab)
+                    p+=2
+                else:
+                    new_w.append(word[p])
+                    p+=1
+        return new_w
+    else:
+        return word
+
+def count_adjacent_pairs(corpus ) -> dict[tuple[bytes, bytes], int]:
+    """Return a dictionary mapping each adjacent pair of tokens in `corpus` to the number of times it occurs."""
+    counts = defaultdict(int)
+    for w in corpus:
+        if len(w)>1:
+            for index1, index2 in zip(w[:-1], w[1:]):
+                counts[(index1, index2)] += 1
+    return counts
+
+def concerned_words(corpus, pairs):
+    corpus =  [word for word in corpus if list(pairs)[0] in word and list(pairs)[1] in word ]
+    return corpus
+
+def count_v2(corpus, counts, pairs):
+    for W in corpus:
+        new_w = []
+        p=0
+        #print(list(pairs), word)
+        if list(pairs)[0] in W and list(pairs)[1] in W:
+            while p < len(W):
+                    if p +1< len(W)and W[p]==pairs[0] and pairs[1]==W[p+1] :
+                        new_vocab = pairs[0] +pairs[1]
+                        new_w.append(new_vocab)
+                        p+=2
+                    else:
+                        new_w.append(W[p])
+                        p+=1 
+            if new_w != W:
+                for index1, index2 in zip(W[:-1], W[1:]):
+                    counts[(index1, index2)] -= 1
+                for index1, index2 in zip(new_w[:-1], new_w[1:]):
+                                    counts[(index1, index2)] += 1
+    return counts
+                
+                        
+    
+    
 
 
 def run_train_bpe(
@@ -592,51 +634,70 @@ def run_train_bpe(
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
 
-
-    #special_tokens_binary = [s.encode('utf-8') for s in special_tokens]
-    st_escape = [re.escape(st)  for st in special_tokens]
-    pat_st =  "|".join(st_escape) 
-    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    corpus = []
+    t0 = time.perf_counter()
     vocab: dict[int, bytes] ={}
     merges: list[tuple[bytes, bytes]] =[]
-    with open(input_path, "r", encoding="utf-8") as f:
-        train_data = f.read()
-    initial = 0
-    matches = re.finditer(pat_st, train_data)
-    match = next(matches, None)
-    while True :
-        if match is not None:
-            decode_corpus = train_data[initial:match.start()]
-            corpus.extend([[bytes([b]) for b in w.encode("utf-8")] for w in re.findall(PAT, decode_corpus)])
-            corpus.append([match.group()])
-            initial = match.end()
-            match = next(matches, None)
-        else:
-            decode_corpus = train_data[initial:]
-            corpus.extend([[bytes([b]) for b in w.encode("utf-8")] for w in re.findall(PAT, decode_corpus)])
-            break
-    sp_vocab = {i: st.encode('utf-8') for i, st in enumerate(special_tokens) }
+    special_tokens_binary = [st.encode('utf-8') for st in special_tokens]
+    sp_vocab = {i: st for i, st in enumerate(special_tokens_binary) }
+    special_tokens_binary = [s.encode('utf-8') for s in special_tokens]
     vocab_size_v1=len(sp_vocab)
     vocab_256 = { vocab_size_v1+x:bytes([x]) for x in range(256)}
     vocab= sp_vocab | vocab_256 
     cs = len(vocab) 
-    for v in range(vocab_size-cs):
-        pairs = [pair for w in corpus if len(w) > 1 for pair in bpe_pair(w)]
-        merges_pairs = Counter(pairs)
-        if len(pairs) ==0:
+    st_escape = [re.escape(st)  for st in special_tokens]
+    pat_st =  "|".join(st_escape) 
+    PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+    t1 = time.perf_counter()    
+    with open(input_path, "r", encoding="utf-8") as f:
+        training_data = f.read()
+        initial = 0
+        corpus=[]
+        matches = re.finditer(pat_st, training_data)
+        match = next(matches, None)
+        while True :
+            if match is not None:
+                decode_corpus = training_data[initial:match.start()]
+                corpus.extend([[bytes([b]) for b in w.encode("utf-8")]  for w in re.findall(PAT, decode_corpus)])
+                corpus.append([match.group()])
+                initial = match.end()
+                match = next(matches, None)
+            else:
+                decode_corpus = training_data[initial:]
+                corpus.extend([[bytes([b]) for b in w.encode("utf-8")]  for w in re.findall(PAT, decode_corpus)])
+                break
+    t2 = time.perf_counter()
+    t_count = t_best = t_merge = 0.0
+    pairs = count_adjacent_pairs(corpus)
+    for _ in range(vocab_size - cs):
+        a = time.perf_counter()
+        
+        
+        if not pairs:
             break
-        best_pair, _ = max(merges_pairs.items(), key=lambda x: (x[1], x[0]))
+        best_pair, _ = max(pairs.items(), key=lambda x: (x[1], x[0]))
         vocab[len(vocab)] = best_pair[0] + best_pair[1]
-        corpus = [merge_pairs(best_pair,w) for w in corpus]
-        merges.append((best_pair[0],best_pair[1]))
+        c = time.perf_counter()
+        corpus = [merge_pairs(best_pair, w) for w in corpus]
+        d = time.perf_counter()
+        pairs = count_v2(corpus, pairs, best_pair)
+        #print(pairs)
+        b = time.perf_counter()
+        merges.append(best_pair) 
+        
+        t_count += c - a
+        t_best  += d - c
+        t_merge += b - d
 
+    print(f"count {t_count:.2f}s | best {t_best:.2f}s | merge {t_merge:.2f}s")
+    print(f"Step 1 init:  {t1-t0:.2f}s | reading {t2-t1:.2f}s")
     return (vocab, merges)
 
 
-# path = "tests/fixtures/tinystories_sample_5M.txt"
-# special_tokens = ["<|endoftext|>"]
-# vocab_size = 1000
-# v, m = run_train_bpe(path, vocab_size, special_tokens)
-# print(v)
+
+#path = "tests/fixtures/corpus.en"
+path="tests/fixtures/corpus.en"
+special_tokens = ["<|endoftext|>"]
+vocab_size = 500
+v, m = run_train_bpe(path, vocab_size, special_tokens)
+#print(v)
 

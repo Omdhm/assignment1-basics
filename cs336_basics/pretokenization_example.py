@@ -98,21 +98,49 @@ def wawa_file_reader(
      
 
 import regex as re
+from multiprocessing import Pool
 
-with open("tests/fixtures/tinystories_sample_5M.txt", "rb") as f:
-    num_processes = 4
-    special_tokens=[b"<|endoftext|>"]
-    boundaries =  wawa_file_reader(f, num_processes, special_tokens )
-    st_escape = [re.escape(st)  for st in special_tokens]
+
+def work(args):
+    path, s, e, special_tokens = args
+    st_escape = [re.escape(st.decode('utf-8'))  for st in special_tokens]
     pat_st =  "|".join(st_escape) 
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
-    #boundaries1 =  find_chunk_boundaries(f, num_processes, b"<|user|>")
-    # # The following is a serial implementation, but you can parallelize this
-    # # by sending each start/end pair to a set of processes.
-    print(boundaries)
-    for start, end in zip(boundaries[:-1], boundaries[1:]):
-            f.seek(start)
-            chunk = f.read(end - start).decode("utf-8", errors="ignore")
-            #print(chunk)
+           
+    with open(path,  "r", encoding="utf-8") as f:
+        f.seek(s)
+        chunk = f.read(e - s)
+        initial = 0
+        corpus=[]
+        matches = re.finditer(pat_st, chunk)
+        match = next(matches, None)
+        while True :
+            if match is not None:
+                decode_corpus = chunk[initial:match.start()]
+                corpus.extend([[bytes([b]) for b in w.encode("utf-8")]  for w in re.findall(PAT, decode_corpus)])
+                corpus.append([match.group()])
+                initial = match.end()
+                match = next(matches, None)
+            else:
+                decode_corpus = chunk[initial:]
+                corpus.extend([[bytes([b]) for b in w.encode("utf-8")]  for w in re.findall(PAT, decode_corpus)])
+                break
+    return corpus
+def processing(f,path, num_processes, special_tokens ):
+    boundaries =  wawa_file_reader(f, num_processes, special_tokens )
+    tasks=[(path, s, e , special_tokens) for s, e in zip(boundaries[:-1], boundaries[1:])] 
+    with Pool(num_processes) as pool:
+        flat = []
+        for sub in pool.imap_unordered(work, tasks):
+            flat.extend(sub)
+    return flat
         
-        # Run pre-tokenization on your chunk and store the counts for each pre-token
+if __name__ == "__main__":
+    path="tests/fixtures/corpus.en"
+    with open(path, "rb") as f:
+        num_processes = 10
+        special_tokens=[b"<|endoftext|>"]
+        flat = processing(f, num_processes, special_tokens )
+    print(flat)
+        
+        
